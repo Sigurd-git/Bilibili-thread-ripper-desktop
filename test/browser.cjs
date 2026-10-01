@@ -6,9 +6,11 @@ const html = '<html><head><script src="/desktop.js"></script></head><body><div c
 const server = http.createServer((req, res) => { res.setHeader("Content-Type", req.url === "/desktop.js" ? "text/javascript; charset=utf-8" : "text/html; charset=utf-8"); res.end(req.url === "/desktop.js" ? fs.readFileSync(path.join(root, "dist/desktop.js")) : html); });
 (async () => {
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
-  const browser = await chromium.launch({ executablePath: "C:/Program Files/Google/Chrome/Application/chrome.exe", headless: true });
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  let browser;
   try {
+    const executablePath = process.env.BTR_BROWSER_EXECUTABLE_PATH;
+    browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+    const origin = `http://127.0.0.1:${server.address().port}`;
     const context = await browser.newContext(), page = await context.newPage(); const errors = [];
     page.on("pageerror", error => { errors.push(error.message); console.error("PAGE ERROR", error.message); });
     let requestCount = 0, failure = false, deadHost = "";
@@ -398,5 +400,8 @@ const server = http.createServer((req, res) => { res.setHeader("Content-Type", r
     await stalling.close();
     assert.deepEqual(errors, []);
     console.log("PASS a node that stalls midway: exact bytes, no fallback, XHR progress never goes backwards;", resumed.stallRequests, "stalled requests,", resumed.tails, "resumed,", Math.round(resumed.ms), "ms");
-  } finally { await browser.close(); server.close(); }
+  } finally {
+    try { await browser?.close(); }
+    finally { if (server.listening) await new Promise(resolve => server.close(resolve)); }
+  }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });

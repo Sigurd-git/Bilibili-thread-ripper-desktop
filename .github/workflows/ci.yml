@@ -1,0 +1,48 @@
+name: Desktop adapter CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Build browser payload
+        run: npm run build
+      - name: Build platform release and manifest
+        run: npm run release
+      - name: Read release version
+        id: release
+        run: node -e "require('fs').appendFileSync(process.env.GITHUB_OUTPUT, 'version=' + require('./desktop.json').version + '\n')"
+      - name: Run unit and maintenance fixture tests
+        run: npm test
+      - name: Install Chromium for browser regressions
+        run: npx playwright install chromium
+      - name: Run browser regressions
+        run: npm run test:browser
+      - name: Upload locally built release for inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-${{ runner.os }}
+          path: |
+            packages/BTR_Desktop-${{ steps.release.outputs.version }}.zip
+            latest.json
+          if-no-files-found: error

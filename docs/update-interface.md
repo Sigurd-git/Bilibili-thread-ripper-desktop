@@ -1,5 +1,17 @@
 # 版本和更新文件
 
+## macOS 与 Windows 平台
+
+2026.9.29.1-d2 起同时支持 macOS 与 Windows。更新源固定为 `https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/`。清单新增 `platforms`：Windows 构建为 `["win32", "darwin"]`，macOS 构建为 `["darwin"]`。旧清单省略此字段时按 Windows 包处理；当前平台没有对应资源时返回 `platform-unavailable`，不启动维护。发布双平台版本采用 Windows 构建的 ZIP 与匹配清单。
+
+macOS 在独立 `.app` 副本上接入 BTR。`macos/installer.cjs` 通过已验证的原始应用备份制作暂存副本，更新 `ElectronAsarIntegrity` 的原始 JSON header SHA-256，作保留既有 entitlements/运行时标志的本地签名并验证，最后交换应用目录与安装记录。维护代码在用户 Application Support 中独立保存，原版应用作为 Electron Node 运行时。未改动官方应用、缓存里的官方更新程序、Electron fuse、渲染隔离或证书校验。
+
+维护 IPC 校验脚本与全部依赖 SHA-256，从 `process.resourcesPath` 定位副本，启动脱离客户端的官方源运行时，传入操作、目标、客户端 PID 和自定义维护数据目录。helper 等待客户端退出后操作；更新额外锁定清单版本与包 SHA-256。macOS 没有独立进度窗口，操作日志写入 `~/Library/Application Support/BTR_Desktop/logs`。
+
+macOS 的还原使用完整原始 `.app`，恢复 ASAR、Info.plist、可执行文件及签名；保留 removed ownership 记录使正常卸载后重装和删除副本后重建都能完成。维护互斥使用独立 PID/UUID contender 和 ticket 优先级，异常退出后只回收死进程的独立记录，避免删除另一维护任务的新锁。
+
+下面保留的维护窗口、PowerShell、注册表和 Guard 说明适用于 Windows。
+
 对外完整版本是 `主版本-d桌面修订`，例如 `0.9.1.1-d1`、`0.9.1.1-d2`。主版本升级后从 `d1` 开始，例如 `0.9.1.2-d1`。浏览器版从 2026.9.27.1 起改用日期版本号（`年.月.日.N`），桌面版跟着写成 `2026.9.29.1-d1` 这样，格式检查照样是四段数字加 `-d` 修订号。下文单独写的 d1 到 d5 都是 0.9.1.1 的桌面修订，“d5 起”包括之后的所有版本。`desktop.json` 的 `baseVersion` 与 `adapterRevision` 是构建检查依据，`version` 必须等于两者拼接的完整版本。
 
 `latest.json` 是客户端和一键安装命令唯一读取的更新入口，固定在本仓库 main 分支。不使用 GitHub Release，也不需要额外服务器或密钥。
@@ -7,10 +19,11 @@
 ```json
 {
   "schema": 1,
-  "version": "2026.9.29.1-d1",
-  "downloadUrl": "https://raw.githubusercontent.com/MrTangLuyao/Bilibili-thread-ripper-desktop/main/packages/BTR_Desktop-2026.9.29.1-d1.zip",
+  "version": "2026.9.29.1-d2",
+  "downloadUrl": "https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/packages/BTR_Desktop-2026.9.29.1-d2.zip",
   "sha256": "构建时自动生成的64位SHA-256",
-  "supportedClientVersions": ["1.18.0"]
+  "supportedClientVersions": ["1.18.0"],
+  "platforms": ["win32", "darwin"]
 }
 ```
 

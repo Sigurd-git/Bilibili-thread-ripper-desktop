@@ -18,7 +18,8 @@ class Asar {
     this.edits = new Map();
   }
   static open(file) { return new Asar(fs.readFileSync(file)); }
-  entry(name) { return safePath(name).split("/").reduce((n, k) => n?.files?.[k], this.header); }
+  entry(name) { return safePath(name).split("/").reduce((n, k) => n?.files && Object.hasOwnProperty.call(n.files, k) ? n.files[k] : undefined, this.header); }
+  headerHash() { return sha(this.bytes.subarray(16, 16 + this.bytes.readUInt32LE(12))); }
   read(name) {
     if (this.edits.has(name)) return this.edits.get(name);
     const entry = this.entry(name);
@@ -35,11 +36,11 @@ class Asar {
       const keys = name.split("/"); let node = header;
       for (const key of keys.slice(0, -1)) {
         node.files ||= {};
-        node.files[key] ||= { files: {} };
+        if (!Object.hasOwnProperty.call(node.files, key)) Object.defineProperty(node.files, key, {value:{files:{}},enumerable:true,writable:true,configurable:true});
         if (!node.files[key].files) throw Error("ASAR file/directory conflict");
         node = node.files[key];
       }
-      node.files ||= {}; node.files[keys.at(-1)] = { size: 0, offset: "0" };
+      node.files ||= {}; Object.defineProperty(node.files, keys.at(-1), {value:{size:0,offset:"0"},enumerable:true,writable:true,configurable:true});
     }
     let offset = 0; const bodies = [];
     const walk = (node, prefix = "") => {
@@ -50,7 +51,8 @@ class Asar {
           const body = this.read(full);
           entry.offset = String(offset); entry.size = body.length;
           if (entry.integrity || this.edits.has(full)) {
-            const blockSize = entry.integrity?.blockSize || 4 * 1024 * 1024;
+            const blockSize = entry.integrity?.blockSize ?? 4 * 1024 * 1024;
+            if (!Number.isSafeInteger(blockSize) || blockSize < 1) throw Error("Invalid ASAR integrity block size");
             const blocks = [];
             for (let i = 0; i < body.length; i += blockSize) blocks.push(sha(body.subarray(i, i + blockSize)));
             entry.integrity = { algorithm: "SHA256", hash: sha(body), blockSize, blocks };

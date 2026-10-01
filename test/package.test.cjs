@@ -142,19 +142,32 @@ test("installation repair survives an official overwrite and removal restores ex
 });
 test("repository updates use exact version inequality including rollback", async () => {
   let calls = 0;
-  assert.equal((await check({ enabled: false }, {}, () => { calls++; })).state, "not-configured"); assert.equal(calls, 0);
+  assert.equal((await check({ enabled: false }, {}, () => { calls++; }, "win32")).state, "not-configured"); assert.equal(calls, 0);
   const manifest = {schema:1,version:"0.9.1.1-d1",sha256:"a".repeat(64),downloadUrl:RAW+"packages/BTR_Desktop-0.9.1.1-d1.zip",supportedClientVersions:["1.18.0"]};
   const options={enabled:true,manifestUrl:RAW+"latest.json"};
   const fakeFetch=async(url,init)=>{assert.ok(url.startsWith(RAW+"latest.json?t="));assert.equal(init.redirect,"error");assert.equal(init.credentials,"omit");return{ok:true,text:async()=>JSON.stringify(manifest)}};
-  assert.equal((await check(options,{version:"0.9.1.1-d1"},fakeFetch)).state,"current");
-  for(const version of ["0.9.1.1", "0.9.1.1-d2", "0.9.2.0-d1"]) assert.equal((await check(options,{version},fakeFetch)).state,"available");
+  assert.equal((await check(options,{version:"0.9.1.1-d1"},fakeFetch,"win32")).state,"current");
+  for(const version of ["0.9.1.1", "0.9.1.1-d2", "0.9.2.0-d1"]) assert.equal((await check(options,{version},fakeFetch,"win32")).state,"available");
+  const unsupported=await check(options,{version:"0.9.1.1-d2"},fakeFetch,"darwin");assert.equal(unsupported.state,"platform-unavailable");assert.match(unsupported.message,/macOS/);assert.equal(unsupported.manifest.version,manifest.version);
+  assert.equal((await check(options,{version:manifest.version},fakeFetch,"darwin")).state,"platform-unavailable");
+  const unified={...manifest,platforms:["win32","darwin"]},unifiedFetch=async()=>({ok:true,text:async()=>JSON.stringify(unified)});
+  assert.deepEqual(validateManifest(unified).platforms,["win32","darwin"]);
+  for(const platform of ["win32","darwin"]) {
+    assert.equal((await check(options,{version:"0.9.1.1-d2"},unifiedFetch,platform)).state,"available");
+    assert.equal((await check(options,{version:manifest.version},unifiedFetch,platform)).state,"current");
+  }
+  assert.equal((await check(options,{},unifiedFetch,"linux")).state,"platform-unavailable");
+  const macOnlyFetch=async()=>({ok:true,text:async()=>JSON.stringify({...manifest,platforms:["darwin"]})});
+  assert.equal((await check(options,{},macOnlyFetch,"win32")).state,"platform-unavailable");
+  assert.equal((await check(options,{},macOnlyFetch,"darwin")).state,"available");
+  for(const platforms of [null,[],"darwin",["linux"],["win32","win32"],["darwin","darwin"],["darwin",null]])assert.throws(()=>validateManifest({...manifest,platforms}),/platforms/);
   assert.throws(()=>validateManifest({...manifest,downloadUrl:"https://evil.example/pkg.zip"}),/repository/);
   assert.throws(()=>validateManifest({...manifest,version:"../escape"}),/version/);
   // d5 no longer needs the client list; older updaters still get a valid one when present.
   const {supportedClientVersions,...withoutList}=manifest;
   assert.equal(validateManifest(withoutList).version,"0.9.1.1-d1");
   assert.throws(()=>validateManifest({...manifest,supportedClientVersions:["bad"]}),/legacy/);
-  await assert.rejects(check(options,{},async()=>({ok:false,status:404})),/404/);
-  await assert.rejects(check(options,{},async()=>({ok:true,text:async()=>"x".repeat(65537)})),/too large/);
-  await assert.rejects(check(options,{},async()=>{throw Error("offline")}),/offline/);
+  await assert.rejects(check(options,{},async()=>({ok:false,status:404}),"win32"),/404/);
+  await assert.rejects(check(options,{},async()=>({ok:true,text:async()=>"x".repeat(65537)}),"win32"),/too large/);
+  await assert.rejects(check(options,{},async()=>{throw Error("offline")},"win32"),/offline/);
 });

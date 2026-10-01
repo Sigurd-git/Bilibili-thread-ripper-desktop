@@ -75,9 +75,11 @@ function register(electron) {
       // Uninstall is entirely local and must also work when GitHub is unavailable.
       const result = remove ? null : inspected || await inspect();
       if (!remove && result.state !== "available") return result;
+      const mac = process.platform === "darwin";
+      if (!mac && process.platform !== "win32") throw Error("当前系统暂不支持 BTR 维护");
       const options = remove
-        ? {type:"warning",title:"卸载 BTR",message:"确定卸载 BTR？",detail:"将关闭哔哩哔哩、还原官方客户端并重新打开。不会卸载哔哩哔哩，也不会删除账号、缓存和个人设置。对应的 BTR 桌面快捷方式会移除。",buttons:["卸载 BTR","取消"],defaultId:1,cancelId:1,noLink:true}
-        : {type:"question",title:"检测到新的BTR线程撕裂者更新",message:`版本 ${result.manifest.version}`,detail:"将从BTR Desktop 官方仓库获取更新。确认后会关闭哔哩哔哩并显示独立更新进度，完成后重新打开客户端。",buttons:["安装更新","取消"],defaultId:1,cancelId:1,noLink:true};
+        ? {type:"warning",title:"卸载 BTR",message:"确定卸载 BTR？",detail:mac ? "将关闭 BTR 客户端副本、还原副本中的官方资源并重新打开。官方源客户端、账号、缓存和个人设置会保留。维护日志保存在 ~/Library/Application Support/BTR_Desktop/logs。" : "将关闭哔哩哔哩、还原官方客户端并重新打开。不会卸载哔哩哔哩，也不会删除账号、缓存和个人设置。对应的 BTR 桌面快捷方式会移除。",buttons:["卸载 BTR","取消"],defaultId:1,cancelId:1,noLink:true}
+        : {type:"question",title:"检测到新的BTR线程撕裂者更新",message:`版本 ${result.manifest.version}`,detail:mac ? "将从 BTR Desktop 官方仓库获取更新。确认后会关闭 BTR 客户端副本，完成后重新打开。维护日志保存在 ~/Library/Application Support/BTR_Desktop/logs。" : "将从BTR Desktop 官方仓库获取更新。确认后会关闭哔哩哔哩并显示独立更新进度，完成后重新打开客户端。",buttons:["安装更新","取消"],defaultId:1,cancelId:1,noLink:true};
       publish({state:"confirming",message:remove?"请确认是否卸载 BTR":"请确认是否安装更新"});
       const parent = BrowserWindow.fromWebContents(event.sender);
       const answer = parent ? await dialog.showMessageBox(parent,options) : await dialog.showMessageBox(options);
@@ -86,9 +88,40 @@ function register(electron) {
         return publish(remove ? {...(latest || {state:"idle"}),message:"已取消卸载 BTR"} : {...result,message:"已取消更新"});
       }
       if (!installed.installRoot || !path.isAbsolute(installed.installRoot)) throw Error("找不到 BTR 安装目录");
-      const script = path.resolve(installed.installRoot, "install.ps1");
+      const script = path.resolve(installed.installRoot, mac ? "macos/installer.cjs" : "install.ps1");
       if (!fs.existsSync(script)) throw Error("找不到维护脚本，请重新运行 README 中的一键安装命令");
       if (crypto.createHash("sha256").update(fs.readFileSync(script)).digest("hex") !== config.installerSha256) throw Error("维护脚本校验失败，请重新安装 BTR");
+      if (mac) {
+        const files = config.maintenanceFiles;
+        if (!files || typeof files !== "object" || Array.isArray(files) || !Object.keys(files).length) throw Error("缺少维护文件校验记录，请重新安装 BTR");
+        for (const [name, digest] of Object.entries(files)) {
+          const file = path.resolve(installed.installRoot, name), relative = path.relative(installed.installRoot, file);
+          if (!name || path.isAbsolute(name) || relative.startsWith(".." + path.sep) || relative === ".." || !relative || !/^[a-f0-9]{64}$/.test(digest)
+            || !fs.existsSync(file) || crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex") !== digest) throw Error("维护文件校验失败，请重新安装 BTR");
+        }
+        const resources = process.resourcesPath;
+        if (!resources || !path.isAbsolute(resources)) throw Error("无法识别 macOS 客户端资源目录");
+        const client = path.resolve(resources, "../..");
+        if (!client.endsWith(".app") || resources !== path.join(client, "Contents", "Resources")) throw Error("无法识别 macOS 客户端副本");
+        const runtime = installed.runtimePath;
+        if (!runtime || !path.isAbsolute(runtime) || !fs.existsSync(runtime) || runtime.startsWith(client + path.sep)) throw Error("找不到官方源客户端的维护运行环境，请重新安装 BTR");
+        const environment = {...process.env,ELECTRON_RUN_AS_NODE:"1"};
+        const args = [script,remove ? "remove" : "update","--client",client,"--wait-pid",String(process.pid)];
+        if (installed.dataRoot && path.isAbsolute(installed.dataRoot)) args.push("--data-dir",installed.dataRoot);
+        if (!remove) args.push("--version",result.manifest.version,"--sha256",result.manifest.sha256);
+        const child = spawn(runtime,args,{detached:true,stdio:"ignore",env:environment});
+        await new Promise((resolve,reject)=>{child.once("spawn",resolve);child.once("error",reject);});
+        started=true; operation=remove?"uninstalling":"installing";
+        // A client hook can cancel quit. Keep its controls usable if the helper exits.
+        child.once("exit",code=>{
+          operation="";
+          try { publish({state:code === 0 ? "idle" : "error",message:code === 0 ? "维护程序已结束，结果请查看维护日志" : "维护未完成，请查看 ~/Library/Application Support/BTR_Desktop/logs 中的日志后重试"}); } catch (_) {}
+        });
+        child.unref();
+        const status = publish({state:operation,message:remove ? "正在卸载 BTR，客户端将关闭；结果请查看维护日志" : "正在更新 BTR，客户端将关闭；结果请查看维护日志"});
+        electron.app.quit();
+        return status;
+      }
       const client = path.dirname(process.execPath);
       const environment = {...process.env};
       delete environment.PSModulePath;
@@ -121,6 +154,7 @@ function register(electron) {
 // The guard registers its startup entry, exits at once if it already runs, and stays off
 // when the user disabled it in Task Manager.
 function startGuard() {
+  if (process.platform !== "win32") return false;
   const config = JSON.parse(fs.readFileSync(path.join(__dirname, "update-config.json"), "utf8"));
   const installed = JSON.parse(fs.readFileSync(path.join(__dirname, "installed.json"), "utf8"));
   if (!config.guardSha256 || !installed.installRoot || !path.isAbsolute(installed.installRoot)) return false;

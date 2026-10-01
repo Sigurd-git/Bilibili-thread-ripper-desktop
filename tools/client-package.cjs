@@ -3,6 +3,7 @@ let fs;
 try { fs = require("original-fs"); } catch (_) { fs = require("node:fs"); }
 const path = require("node:path");
 const { Asar, sha } = require("./asar.cjs");
+const { resolveClient } = require("./client-path.cjs");
 const project = path.resolve(__dirname, "..");
 const config = JSON.parse(fs.readFileSync(path.join(project, "desktop.json")));
 const BUNDLE_FILE = "btr-desktop/desktop.js", BOOTSTRAP_FILE = "btr-desktop/bootstrap.cjs";
@@ -13,12 +14,16 @@ function bootstrapPrefix(entry) {
 }
 // A BOM and a leading "use strict" directive must stay first, or the official file changes meaning.
 function splitHead(text) {
-  const head = /^﻿?(?:\s*(["'])use strict\1[ \t]*;?[ \t]*(?:\r?\n)?)?/.exec(text)[0];
+  const head = /^﻿?(?:#![^\r\n]*(?:\r?\n|$))?(?:(?:\s|\/\/[^\r\n]*(?:\r?\n|$)|\/\*[\s\S]*?\*\/)*(["'])use strict\1[ \t]*;?[ \t]*(?:\r?\n)?)?/.exec(text)[0];
   return [head, text.slice(head.length)];
 }
 function withBootstrap(entry, text) { const [head, body] = splitHead(text); return head + bootstrapPrefix(entry) + body; }
 function hasBootstrap(entry, text) { return splitHead(text)[1].startsWith(bootstrapPrefix(entry)); }
-function hooks(bundle) {
+const MAC_MAINTENANCE_FILES = ["macos/installer.cjs", "desktop.json", "dist/desktop.js", "dist/payload.json", "src/bootstrap.cjs", "src/update-main.cjs", "tools/asar.cjs", "tools/client-path.cjs", "tools/client-package.cjs", "tools/update-provider.cjs", "tools/https-json.cjs", "tools/zip.cjs"];
+function hooks(bundle, platform = process.platform) {
+  const maintenance = platform === "darwin"
+    ? { platform, installerSha256:sha(fs.readFileSync(path.join(project,"macos","installer.cjs"))), maintenanceFiles:Object.fromEntries(MAC_MAINTENANCE_FILES.map(file => [file, sha(fs.readFileSync(path.join(project,file)))])) }
+    : { platform, installerSha256:sha(fs.readFileSync(path.join(project,"install.ps1"))),launcherSha256:sha(fs.readFileSync(path.join(project,"BTR_Desktop.exe"))),guardSha256:sha(fs.readFileSync(path.join(project,"BTR_Guard.exe"))) };
   const bootstrap = fs.readFileSync(path.join(project, "src", "bootstrap.cjs"));
   const preload = Buffer.from(`"use strict";\n(() => {\n` +
     `if (!process.isMainFrame || location.origin !== "https://bilipc.bilibili.com" || !/^\\/(index|player)\\.html$/.test(location.pathname)) return;\n` +
@@ -35,7 +40,7 @@ function hooks(bundle) {
     "update-main":fs.readFileSync(path.join(project,"src","update-main.cjs")),
     "update-provider":fs.readFileSync(path.join(project,"tools","update-provider.cjs")),
     "https-json":fs.readFileSync(path.join(project,"tools","https-json.cjs")),
-    "update-config":Buffer.from(JSON.stringify({...config,installerSha256:sha(fs.readFileSync(path.join(project,"install.ps1"))),launcherSha256:sha(fs.readFileSync(path.join(project,"BTR_Desktop.exe"))),guardSha256:sha(fs.readFileSync(path.join(project,"BTR_Guard.exe")))}))
+    "update-config":Buffer.from(JSON.stringify({...config,...maintenance}))
   };
 }
 const hookFile = key => `btr-desktop/${key}.${key === "update-config" ? "json" : "cjs"}`;
@@ -60,30 +65,29 @@ function inspect(archive) {
   if (archive.entry("btr-desktop/installed.json")) installed = JSON.parse(archive.text("btr-desktop/installed.json"));
   return { clientVersion: String(app.version || "unknown"), installed, entry: mainEntry(archive, app) };
 }
-function patch(original, bundle, metadata) {
+function patch(original, bundle, metadata, platform = process.platform) {
   const info = inspect(original);
   if (info.installed) throw Error("只能在已验证的原始备份上制作补丁");
   if (!info.entry) throw Error(`无法识别客户端 ${info.clientVersion} 的入口结构，没有修改官方文件`);
   const entry = original.text(info.entry);
   if (entry.includes(BOOTSTRAP_FILE)) throw Error("客户端已经包含 BTR 入口");
   original.set(info.entry, withBootstrap(info.entry, entry));
-  for (const [key,value] of Object.entries(hooks(bundle))) original.set(hookFile(key),value);
+  for (const [key,value] of Object.entries(hooks(bundle, platform))) original.set(hookFile(key),value);
   original.set(BUNDLE_FILE, bundle);
   original.set("btr-desktop/installed.json", JSON.stringify(metadata));
   return original.pack();
 }
-function run(action, clientPath) {
-  if (!clientPath || !path.isAbsolute(clientPath)) throw Error("需要客户端绝对路径");
-  const client = fs.realpathSync(clientPath);
-  const target = fs.statSync(client).isDirectory() ? path.join(client, "resources", "app.asar") : client;
-  if (path.extname(target) !== ".asar") throw Error("目标必须是客户端 ASAR 资源");
-  if (fs.lstatSync(target).isSymbolicLink()) throw Error("不处理链接形式的客户端资源");
+function run(action, clientPath, options = {}) {
+  const {client, target, bundle:appBundle} = resolveClient(clientPath);
+  const platform = options.platform || process.platform;
+  if (appBundle && action !== "status" && action !== "check-remove" && !options.allowMacBundleMutation) throw Error("macOS 安装和还原请使用 install.sh，以同步 ASAR 完整性和应用签名");
   const bytes = fs.readFileSync(target), hash = sha(bytes), archive = new Asar(bytes), info = inspect(archive);
   if (action === "status") {
-    const bundle = fs.readFileSync(path.join(project, "dist", "desktop.js")), expected = hooks(bundle);
+    const bundle = fs.readFileSync(path.join(project, "dist", "desktop.js")), expected = hooks(bundle, platform);
     return { ...info, path: client, sha256: hash, current: isCurrent(archive, info, sha(bundle), expected), supported: !!info.entry };
   }
-  const statePath = path.join(path.dirname(target), "btr-desktop-backups");
+  const statePath = options.statePath || path.join(path.dirname(target), "btr-desktop-backups");
+  if (!path.isAbsolute(statePath)) throw Error("备份目录必须是绝对路径");
   const stateFile = path.join(statePath, path.basename(target) === "app.asar" ? "deployment.json" : `${path.basename(target)}.deployment.json`);
   const deployment = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile)) : null;
   if (action === "remove" || action === "check-remove") {
@@ -103,7 +107,7 @@ function run(action, clientPath) {
   const bundle = fs.readFileSync(path.join(project, "dist", "desktop.js"));
   const payload = JSON.parse(fs.readFileSync(path.join(project, "dist", "payload.json")));
   if (sha(bundle) !== payload.sha256) throw Error("BTR 文件校验失败");
-  const expected = hooks(bundle);
+  const expected = hooks(bundle, platform);
   if (isCurrent(archive, info, payload.sha256, expected)) return { state: "current", clientVersion: info.clientVersion };
   let originalBytes = bytes;
   if (info.installed) {
@@ -113,17 +117,21 @@ function run(action, clientPath) {
     if (sha(originalBytes) !== backupHash || inspect(new Asar(originalBytes)).clientVersion !== info.clientVersion) throw Error("原始备份不匹配");
   }
   const originalHash = sha(originalBytes);
-  const metadata = { schema: 1, version: config.version, adapterRevision: config.adapterRevision, clientVersion: info.clientVersion, originalSha256: originalHash, payloadSha256: payload.sha256, installRoot:project };
-  const patched = patch(new Asar(originalBytes), bundle, metadata);
+  const metadata = { schema: 1, version: config.version, adapterRevision: config.adapterRevision, clientVersion: info.clientVersion, originalSha256: originalHash, payloadSha256: payload.sha256, installRoot:project, platform, ...options.metadata };
+  const patched = patch(new Asar(originalBytes), bundle, metadata, platform);
   const verify = new Asar(patched);
   if (sha(verify.read(BUNDLE_FILE)) !== payload.sha256) throw Error("补丁自检失败");
   fs.mkdirSync(statePath, { recursive: true });
   const backupPath = path.join(statePath, `${originalHash}.asar`);
   if (!fs.existsSync(backupPath)) fs.writeFileSync(backupPath, originalBytes, { flag: "wx" });
   if (sha(fs.readFileSync(backupPath)) !== originalHash) throw Error("备份内容校验失败");
-  replace(target, patched);
-  fs.writeFileSync(stateFile, JSON.stringify({ ...metadata, patchedSha256: sha(patched) }, null, 2));
-  return { state: "installed", clientVersion: info.clientVersion, version: config.version, backupPath, removedBackups: pruneBackups(statePath) };
+  const previousRecord = fs.existsSync(stateFile) ? fs.readFileSync(stateFile) : null;
+  // Persist recovery information before replacing resources. A failed record write must not
+  // leave a patched client that cannot be restored; roll back the record if replacement fails.
+  replace(stateFile, Buffer.from(JSON.stringify({ ...metadata, patchedSha256: sha(patched) }, null, 2)));
+  try { replace(target, patched); }
+  catch (error) { if (previousRecord) replace(stateFile, previousRecord); else fs.unlinkSync(stateFile); throw error; }
+  return { state: "installed", clientVersion: info.clientVersion, version: config.version, backupPath, removedBackups: options.pruneBackups === false ? [] : pruneBackups(statePath) };
 }
 function isCurrent(archive, info, bundleHash, expected) {
   return !!(info.installed && info.entry && info.installed.payloadSha256 === bundleHash && archive.entry(BUNDLE_FILE) && sha(archive.read(BUNDLE_FILE)) === bundleHash
@@ -156,4 +164,4 @@ if (require.main === module) {
     .then(result => { report(result); console.log(JSON.stringify(result, null, 2)); })
     .catch(error => { report({ state: "error", message: error.message }); console.error(error.message); process.exitCode = 1; });
 }
-module.exports = { inspect, patch, run };
+module.exports = { inspect, patch, run, MAC_MAINTENANCE_FILES };
