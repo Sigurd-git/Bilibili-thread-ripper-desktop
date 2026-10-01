@@ -17,7 +17,7 @@ function Write-BtrProgress([string]$Phase, [long]$Done = 0, [long]$Total = 0) {
 }
 
 function Get-BtrBytes([string]$Url, [int]$Limit) {
-    if (-not $Url.StartsWith('https://raw.githubusercontent.com/MrTangLuyao/Bilibili-thread-ripper-desktop/main/', [StringComparison]::Ordinal)) { throw 'Unexpected download URL.' }
+    if (-not $Url.StartsWith('https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/', [StringComparison]::Ordinal)) { throw 'Unexpected download URL.' }
     Add-Type -AssemblyName System.Net.Http
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $handler = New-Object Net.Http.HttpClientHandler
@@ -46,11 +46,16 @@ function Get-BtrSha([byte[]]$Bytes) {
     try { return ([BitConverter]::ToString($algorithm.ComputeHash($Bytes))).Replace('-', '').ToLowerInvariant() } finally { $algorithm.Dispose() }
 }
 function Get-BtrManifest {
-    $bytes = Get-BtrBytes ('https://raw.githubusercontent.com/MrTangLuyao/Bilibili-thread-ripper-desktop/main/latest.json?t=' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) 65536
+    $bytes = Get-BtrBytes ('https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/latest.json?t=' + [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) 65536
     $manifest = [Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json
     if ($manifest.schema -ne 1 -or $manifest.version -cnotmatch '^\d+\.\d+\.\d+\.\d+-d[1-9]\d*$' -or $manifest.sha256 -notmatch '^[a-fA-F0-9]{64}$') { throw 'Invalid release manifest.' }
-    $expected = 'https://raw.githubusercontent.com/MrTangLuyao/Bilibili-thread-ripper-desktop/main/packages/BTR_Desktop-' + $manifest.version + '.zip'
+    $expected = 'https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/packages/BTR_Desktop-' + $manifest.version + '.zip'
     if ($manifest.downloadUrl -cne $expected) { throw 'Release package must belong to the BTR Desktop repository.' }
+    if ($null -ne $manifest.platforms) {
+        $platforms = @($manifest.platforms)
+        if (-not $platforms.Count -or @($platforms | Where-Object { $_ -cne 'win32' -and $_ -cne 'darwin' }).Count -or @($platforms | Select-Object -Unique).Count -ne $platforms.Count) { throw 'Invalid release platforms.' }
+        if ($platforms -cnotcontains 'win32') { throw 'This release does not contain a Windows installer. Use a Windows-built unified package.' }
+    }
     # supportedClientVersions only serves d1-d4 updaters. d5 checks the client structure instead.
     if ($null -ne $manifest.supportedClientVersions -and @($manifest.supportedClientVersions | Where-Object { $_ -notmatch '^\d+(\.\d+){2,3}$' }).Count) { throw 'Invalid legacy client list.' }
     return $manifest

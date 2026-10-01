@@ -25,7 +25,7 @@
     }
     if(event.data.type!=="result")return;
     const value=event.data.result;
-    if(!value || !["current","available","checking","confirming","installing","uninstalling","idle","error","not-configured"].includes(value.state))return;
+    if(!value || !["current","available","checking","confirming","installing","uninstalling","idle","error","not-configured","platform-unavailable"].includes(value.state))return;
     finish(value);
   });
   // The main process owns one timer for all windows, not a timer in every renderer.

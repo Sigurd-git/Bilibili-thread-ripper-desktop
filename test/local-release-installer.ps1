@@ -9,7 +9,7 @@ if (-not $requestedClient -or -not [IO.Path]::IsPathRooted($requestedClient)) { 
 if ($ClientPath -cne $requestedClient) { throw 'Test client path changed unexpectedly.' }
 function Get-BtrBytes([string]$Url, [int]$Limit) {
     $manifest = [IO.File]::ReadAllText((Join-Path $project 'latest.json')) | ConvertFrom-Json
-    if ($Url -like 'https://raw.githubusercontent.com/MrTangLuyao/Bilibili-thread-ripper-desktop/main/latest.json?*') { return ,[Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json)) }
+    if ($Url -like 'https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/latest.json?*') { return ,[Text.Encoding]::UTF8.GetBytes(($manifest | ConvertTo-Json)) }
     if ($Url -cne $manifest.downloadUrl) { throw 'Unexpected fixture URL.' }
     $bytes = [IO.File]::ReadAllBytes((Join-Path $project ('packages\' + [IO.Path]::GetFileName(([Uri]$Url).AbsolutePath))))
     if ($bytes.Length -gt $Limit) { throw 'Fixture package too large.' }

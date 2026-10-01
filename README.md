@@ -1,75 +1,104 @@
 # BTR Desktop
 
-把 Bilibili 线程撕裂者带到官方 Windows 客户端里，原本的播放器、字幕、弹幕和快捷键都保留。
+为官方哔哩哔哩 **macOS 和 Windows 客户端**增加多线程视频下载。保留官方播放器、登录、字幕、弹幕和快捷键。
 
-当前版本 **2026.9.29.1-d1**，不再限制官方客户端版本，已在官方客户端 **1.18.0** 实测
+当前版本 **2026.9.29.1-d2**。macOS 已在 Apple Silicon、官方客户端 **1.19.0 / Electron 22.3.27** 实测。Windows 保留原有安装、更新、卸载和监视程序，已配置 Windows CI 回归；本次修改的 Windows 实机播放尚未验证。
 
-桌面版的性能相比网页端有一点差距，但依旧相比原生提升明显。更多差异，请参考 [difference.md](difference.md)。
+## macOS 安装
 
+先安装并启动过官方哔哩哔哩客户端。下载本项目的 macOS 或双平台安装包并解压，在 `BTR_Desktop` 目录运行：
 
-
-## 安装
-
-1 先安装好官方哔哩哔哩 Windows 客户端
-
-2 右键左下角Windows徽标 选择终端 (Windows11) 或 Powershell (Windows11以前或无终端版版) **不要用管理员身份运行**
-
-3 运行下面的脚本
-
-```powershell
-irm https://raw.githubusercontent.com/MrTangLuyao/Bilibili-thread-ripper-desktop/main/install.ps1 | iex
+```bash
+bash install.sh install
 ```
 
-这会执行这个仓库中的安装脚本，脚本可直接查看 [install.ps1](install.ps1)
+开发者也可以直接使用已构建的仓库：
 
-哔哩哔哩没装在默认位置（`C:\Program Files\bilibili`）也没关系，脚本找不到时会让你输入安装文件夹，把 `哔哩哔哩.exe` 拖进窗口再按回车就行
-
-## 强制更新（如遇到更新异常使用脚本更新）：
-
-**部分旧版本会遇到更新问题，请务必使用这个脚本来强制更新**
-
-打开普通 PowerShell，复制这一行运行：
-
-```powershell
-irm https://raw.githubusercontent.com/MrTangLuyao/Bilibili-thread-ripper-desktop/main/force-update.ps1 | iex
+```bash
+git clone https://github.com/Sigurd-git/Bilibili-thread-ripper-desktop.git
+cd Bilibili-thread-ripper-desktop
+bash install.sh install
 ```
 
-## 设置和更新
+安装器默认读取 `/Applications/哔哩哔哩.app`，生成独立的 `~/Applications/Bilibili BTR.app`。先完全退出官方客户端，再打开 BTR 副本；两个客户端使用同一份官方账号和个人数据。无需 `sudo`，也无需另外安装 Node：没有 Node 时使用官方客户端自带的 Electron 运行时。
 
-系统设置第一项就是线程撕裂者，可以调整 CDN、线程数、错误提示和 Debug。播放器的“齿轮 → 更多播放设置”里也保留 CDN 和线程数，两边同步。
+应用装在其他位置时，传入完整路径；BTR 副本必须与官方源应用分开：
 
-CDN 除了大陆、海外，还可以选“自定义”：在系统设置里勾选已知的服务器，也可以手动添加服务器地址（只接受 B 站自己的视频服务器，最多 32 个）。选了自定义后，BTR 只从你选的服务器下载；一个都没选时按大陆 CDN 下载。播放器菜单里可以切到自定义，服务器列表在系统设置里增减。切换 CDN 或增减服务器不用重新打开视频，从下一段下载开始生效。你选的服务器都下载失败时，和平时一样交回客户端自己下载，不会卡住视频。
+```bash
+bash install.sh install --source '/Applications/哔哩哔哩.app' --client "$HOME/Applications/Bilibili BTR.app"
+```
 
-默认是大陆 CDN、8 线程（线程数一般推荐 8 到 32，不够流畅再往上加），红色错误提示默认不显示，需要排查时在设置里打开“显示错误”。从旧版升级到 0.9.1.2 时，这三项会统一改成新的默认值一次，之后按你的设置保存。
+安装器保存完整原始应用备份，在暂存副本中接入 BTR，更新 `Info.plist` 的 ASAR header hash，再为副本和嵌套可执行文件作本地签名，保留各自已有的 entitlements 和运行时标志。通过 `codesign --verify --deep --strict` 后才替换目标。官方原版保持厂商签名；保留它作为后续维护的运行环境。
 
-同一个视频里，某个 CDN 节点两次一点数据都没给（错误提示里显示“已收到 0 KiB”），BTR 就停用这个节点，这个视频接下来不再用它，换视频后恢复。所有节点都被停用时，仍会继续尝试，避免整个视频放不了。如果是 B 站给的某个下载地址一直被服务器拒绝，只停用这个地址，不连累节点；只拿到 akamaized.net 地址的账号也能用多个节点下载。
+macOS 维护文件、记录和原始备份保存在 `~/Library/Application Support/BTR_Desktop`。维护代码复制到独立的版本目录，移动或删除仓库不会影响已安装副本的卸载。日志保存在其中的 `logs` 文件夹。
 
-系统设置：
+## Windows 安装
 
-![BTR 桌面版系统设置](docs/images/system-settings.png)
+先安装官方哔哩哔哩 Windows 客户端，打开普通 PowerShell，执行：
 
-播放器设置：
+```powershell
+irm https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/install.ps1 | iex
+```
 
-![播放器中的 BTR CDN 和并发线程设置](docs/images/player-settings.png)
+不要以管理员身份打开 PowerShell；写入受保护的安装目录时，安装器会单独请求系统授权。客户端不在默认的 `C:\Program Files\bilibili` 时，脚本会从安装记录和注册表查找，或让你输入安装目录。
 
-自动和手动检查都读取本仓库的 [latest.json](latest.json)。只要完整版本号和仓库不同，就会提示更新。确认后安装，成功后重新打开客户端，不创建 BTR 快捷方式。也可以直接再执行上面那条命令。
+Windows 必须使用包含 `win32` 的双平台安装包；仅在 Mac 构建的包会被 Windows 安装器拒绝，避免误装不含 `.exe` 的包。遇到旧更新器异常，可运行：
 
-如果 d1 或 d2 卡在“正在下载并安装”，请运行上面的强制更新命令。旧版的更新程序可能根本没启动，单纯等待或重复点击不能修好；装上 d3 后才会使用新的进度窗口。d3 和 d4 点更新时，进度窗口会跟着客户端一起消失，但后台仍会装完并重新打开客户端。d3 的卸载会在关闭客户端时被系统一起结束，所以点了没效果；d4 的卸载窗口同样会消失，后台仍会继续执行。0.9.1.1-d5 起这些窗口会一直显示到结束。更新日志保存在 `%LOCALAPPDATA%\BTR_Desktop\logs`，失败时也可以在窗口里直接打开。
+```powershell
+irm https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/force-update.ps1 | iex
+```
 
-更新不要求保留旧配置格式，但不会清空你的 Bilibili 账号和官方客户端数据。
+Windows 维护日志保存在 `%LOCALAPPDATA%\BTR_Desktop\logs`。官方覆盖安装后，现有 BTR Guard 仍能询问是否重新接入；macOS 在官方源升级后重新运行 `bash install.sh install`，即可从新源重新生成副本。
 
-官方客户端平时的自动更新只替换 `%APPDATA%\bilibili` 里的缓存，不会动 BTR，BTR 也不再检查客户端版本号。如果重新下载官方安装包覆盖安装，BTR 会被覆盖，这时后台的 BTR 监视程序会弹窗问你要不要重新接入，确认后关闭客户端、写入 BTR（需要一次管理员授权）再重新打开；也可以直接再运行上面的安装命令。监视程序在当前用户的开机启动项里叫“BTR Desktop”，不常驻窗口，不需要时可以在任务管理器的“启动应用”里关掉。如果新客户端的程序结构 BTR 认不出来，就保持官方客户端不变，不强行注入；播放时加速连续失败，也会自动改回客户端自己的下载。
+## 播放设置
 
-## 还原
+系统设置第一项是“线程撕裂者”。原生播放器的“齿轮 → 更多播放设置”也提供 CDN 与线程数，两处设置会同步。
 
-在系统设置的线程撕裂者区域，点击“检查 BTR 更新”右侧红色的 **卸载 BTR**，再确认即可。独立卸载窗口会先检查备份，随后关闭客户端、恢复官方资源并重新打开，不删除账号、缓存和个人设置。卸载不需要连接 GitHub，对应的 BTR 桌面快捷方式和开机启动的监视程序也会移除。遇到失败可以点击“查看卸载日志”，日志保存在 `%LOCALAPPDATA%\BTR_Desktop\logs`。
+- CDN 可选大陆、海外、自定义。自定义只接受 B 站视频服务器，最多 32 个；未选择服务器时按大陆模式处理。
+- 自动线程数默认开启，按播放与缓冲状态在 8 至 32 之间调节；手动模式可选择 4 至 128。
+- CDN 或线程数在下一次下载请求生效。加速失败交回客户端自身下载；连续失败时暂停当前窗口的加速。
+- “显示错误”和 Debug 默认关闭，可在排查时开启。
+- 直播加速目前尚未实现，界面显示禁用状态。
 
-如果无法进入设置，也可以完全退出客户端后，在安装文件夹运行 `BTR_Desktop.exe remove`。安装文件夹位置记录在 `%LOCALAPPDATA%\BTR_Desktop\current.json`，还原后这条记录和监视程序的启动项会一起清掉。原始备份和本地安装包会保留，不删除仓库代码。
+![系统设置](docs/images/system-settings.png)
 
-## 开发和发版
+![播放器设置](docs/images/player-settings.png)
 
-修改 `desktop.json` 和 `package.json` 的版本信息，然后运行 `npm run release`。把源码、`dist`、`packages` 和 `latest.json` 一起 commit、push 就行，不需要手工上传 GitHub Release。
+网络和 CDN 状态仍会影响缓冲。真实播放验证记录和测试范围见 [docs/verification.md](docs/verification.md)。
 
-下载器仍复用浏览器版代码，桌面差异放在 `src`。不会换掉原生播放器，不接管字幕、登录接口和离线下载。网络和 CDN 状态仍会影响缓冲，不承诺所有视频永不卡顿。
+## 更新和还原
 
-[更新文件说明](docs/update-interface.md) | [验证记录](docs/verification.md)
+系统设置中的“检查 BTR 更新”和“卸载 BTR”均使用可信的本地维护代码。自动更新仍需确认。更新只读取本 fork 的 `latest.json`，校验下载来源、平台和整个 ZIP 的 SHA-256；macOS 还会验证 ZIP 路径、文件大小、CRC 和符号链接。Windows 旧版不带 `platforms` 的清单仍可使用，macOS 要求清单明确包含 `darwin`。
+
+macOS 卸载会在退出后完整恢复副本的官方资源和原始签名，再重新打开。也可以完全退出 BTR 副本后手动操作：
+
+```bash
+bash install.sh status
+bash install.sh remove
+```
+
+如果使用了自定义 `--client`，维护时仍需传入相同路径。卸载后保留已恢复的副本、原始备份和用户数据，可以再次安装；手动删除副本后也可以重新运行安装命令重建。macOS 暂不提供独立的原生维护进度窗口，详细结果保存在维护日志。
+
+Windows 仍可从设置卸载，或完全退出后在安装目录执行 `BTR_Desktop.exe remove`。两个平台的卸载均不访问 GitHub。
+
+## 开发和验证
+
+开发工具使用 **Node.js 22 或更高版本**；已安装客户端中的维护代码兼容 Electron 自带的 Node 16。
+
+```bash
+npm ci
+npm run build
+npm test
+npx playwright install chromium
+npm run test:browser
+```
+
+浏览器测试默认使用 Playwright Chromium；可通过 `BTR_BROWSER_EXECUTABLE_PATH` 指定本机 Chrome。`npm test` 包含 macOS 的原生签名与还原 fixture、跨进程锁测试和 Windows 平台模拟；依赖 Windows PowerShell/.NET 的实机维护用例只在 Windows 运行。macOS 可用 `npm run test:native` 单独运行原生测试。
+
+修改版本时同步 `desktop.json` 和 `package.json`，再运行 `npm run release`。Windows 会编译并校验当前 C# launcher/guard 后生成双平台 ZIP；macOS 跳过 Windows 编译，生成仅支持 macOS 的 ZIP。发布双平台版本应采用 Windows 构建的安装包和对应清单。
+
+`.github/workflows/ci.yml` 为 macOS/Windows 分别构建并测试，上传可审阅的安装包，不自动发布。发布前将匹配的源码、`dist`、`packages` 和 `latest.json` 一起提交；本地生成文件不会自动上传到 GitHub。
+
+`tools/inspect-client.cjs`、`measure-client.cjs` 和 `sample-client.cjs` 仅用于本地开发诊断，读取手动开启的 `127.0.0.1:19391` 调试端口。正常启动不会开启调试端口。
+
+[平台与更新接口](docs/update-interface.md) · [验证记录](docs/verification.md) · [与浏览器版的差异](difference.md)

@@ -1,5 +1,5 @@
 "use strict";
-const RAW = "https://raw.githubusercontent.com/MrTangLuyao/Bilibili-thread-ripper-desktop/main/";
+const RAW = "https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/";
 const VERSION = /^\d+\.\d+\.\d+\.\d+-d[1-9]\d*$/;
 function validateManifest(value) {
   if (!value || value.schema !== 1 || !VERSION.test(value.version)) throw Error("Invalid desktop version manifest");
@@ -7,10 +7,12 @@ function validateManifest(value) {
   // Only d1-d4 updaters read supportedClientVersions. Validate it when present, never require it.
   const legacy = value.supportedClientVersions;
   if (legacy !== undefined && (!Array.isArray(legacy) || !legacy.every(v => /^\d+(\.\d+){2,3}$/.test(v)))) throw Error("Invalid legacy client list");
+  const platforms = value.platforms;
+  if (platforms !== undefined && (!Array.isArray(platforms) || !platforms.length || !platforms.every(v => ["win32","darwin"].includes(v)) || new Set(platforms).size !== platforms.length)) throw Error("Invalid update platforms");
   if (value.downloadUrl !== `${RAW}packages/BTR_Desktop-${value.version}.zip`) throw Error("Update package must belong to this repository");
-  return {schema:1,version:value.version,sha256:value.sha256.toLowerCase(),downloadUrl:value.downloadUrl};
+  return {schema:1,version:value.version,sha256:value.sha256.toLowerCase(),downloadUrl:value.downloadUrl,...(platforms === undefined ? {} : {platforms:[...platforms]})};
 }
-async function check(config, installed, fetchImpl = globalThis.fetch || require("./https-json.cjs")) {
+async function check(config, installed, fetchImpl = globalThis.fetch || require("./https-json.cjs"), platform = process.platform) {
   if (!config.enabled) return {state:"not-configured",message:"更新检查已关闭"};
   if (config.manifestUrl !== RAW + "latest.json") throw Error("Unexpected update manifest URL");
   const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8000);
@@ -25,6 +27,8 @@ async function check(config, installed, fetchImpl = globalThis.fetch || require(
     } else text = await response.text();
     if (Buffer.byteLength(text) > 65536) throw Error("Update manifest too large");
     const manifest = validateManifest(JSON.parse(text));
+    // Legacy release ZIPs contain the Windows installer only.
+    if (!(manifest.platforms || ["win32"]).includes(platform)) return {state:"platform-unavailable",manifest,message:`此发布版本尚未提供 ${platform === "darwin" ? "macOS" : platform === "win32" ? "Windows" : platform} 更新`};
     const different = manifest.version !== installed.version;
     return {state:different?"available":"current",manifest,message:different?`发现 ${manifest.version}`:"当前已是最新版本"};
   } finally { clearTimeout(timer); }

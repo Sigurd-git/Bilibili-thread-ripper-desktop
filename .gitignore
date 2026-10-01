@@ -5,3 +5,4 @@ BTR_Desktop.exe
 BTR_Guard.exe
 release/
 release-stage-*/
+output/

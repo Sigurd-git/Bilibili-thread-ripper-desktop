@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 # Fetch a fresh official installer instead of relying on the installed updater.
 # The installer always reinstalls the manifest version, even if it is unchanged.
 # Its package hashes, client compatibility checks and original backups still apply.
-$btrInstallerUrl = 'https://raw.githubusercontent.com/MrTangLuyao/Bilibili-thread-ripper-desktop/main/install.ps1?t=' + [Guid]::NewGuid().ToString('N')
+$btrInstallerUrl = 'https://raw.githubusercontent.com/Sigurd-git/Bilibili-thread-ripper-desktop/main/install.ps1?t=' + [Guid]::NewGuid().ToString('N')
 [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 Write-Host 'Fetching the latest BTR Desktop installer for a forced update...'
 try {
